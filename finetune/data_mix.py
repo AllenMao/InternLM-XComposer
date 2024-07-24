@@ -8,6 +8,9 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
 
+image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
+video_extensions = {'.mp4', '.avi', '.mkv', '.mov', '.wmv'}
+
 
 def conv2text(sources):
     END_HUMAN = '[UNUSED_TOKEN_145]\n'
@@ -84,7 +87,8 @@ class Mix_dataset(Dataset):
                  batch_size=1,
                  img_size=224,
                  local_rank=0,
-                 hd_num=-1):
+                 hd_num=-1,
+                 weight_dtype=torch.float32):
         """vis_root (string): Root directory of images (e.g. coco/images/)
         ann_root (string): directory to store the annotation file."""
         super().__init__()
@@ -106,7 +110,8 @@ class Mix_dataset(Dataset):
                 has_img=has_img,
                 img_size=img_size,
                 hd_num=hd_num,
-                data_root=data_root)
+                data_root=data_root,
+                weight_dtype=weight_dtype)
             if has_img:
                 self.datasets_multi.append(sub_data_set)
                 self.data_num_multi.append(len(sub_data_set))
@@ -169,7 +174,8 @@ class Sample_dataset(Dataset):
                  has_img=True,
                  img_size=224,
                  hd_num=16,
-                 data_root="",):
+                 data_root="",
+                 weight_dtype=torch.float32):
         self.raw_data = raw_data
         print(f'load {len(self.raw_data)} data')
         self.batch_size = batch_size
@@ -184,7 +190,9 @@ class Sample_dataset(Dataset):
 
         self.data_root = data_root
         self.font = get_font()
-        self.num_frm = 16
+        self.weight_dtype = weight_dtype
+        #TODO maybe set in config
+        self.num_frm = 8
 
     def __len__(self):
         return len(self.raw_data)
@@ -204,7 +212,8 @@ class Sample_dataset(Dataset):
             elif "video" in self.raw_data[i]:
                 video_file = self.raw_data[i]['video']
                 # video frames
-                if video_file is img:
+                _, ext = os.path.splitext(video_file)
+                if ext.lower() not in video_extensions:
                     img_dir = os.path.join(self.data_root, video_file)
                     img_list = sorted(glob.glob("{}/*.jpeg".format(img_dir)))
                     if len(img_list) > self.num_frm:
@@ -236,9 +245,9 @@ class Sample_dataset(Dataset):
                 images_batch = []
                 if type(sample['image']) is list:
                     for im in sample['image']:
-                        images_batch.append(im.unsqueeze(0))
+                        images_batch.append(im.unsqueeze(0).dtype(self.weight_dtype))
                 else:
-                    images_batch.append(sample['image'].unsqueeze(0))
+                    images_batch.append(sample['image'].unsqueeze(0).dtype(self.weight_dtype))
                 images.append(images_batch)
 
         sample = {
@@ -249,3 +258,19 @@ class Sample_dataset(Dataset):
         if self.has_img:
             sample['image'] = images
         return sample
+
+
+if __name__ == "__main__":
+    import sys, os
+    HOME = os.path.expanduser("~")
+    import copy, shutil, random
+    import json
+    import numpy as np
+    
+    data_root = "/mnt/data_root"
+    json_file = "/internlm_data/xxx.json"
+    raw_data = json.load(open(json_file))
+
+    sample_dataset = Sample_dataset(raw_data, 1, has_img=True, img_size=224, hd_num=16, data_root=data_root)
+
+    print(len(sample_dataset), sample_dataset.__get_item__(10))
